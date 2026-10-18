@@ -143,7 +143,7 @@ public class PublishedApkSmokeTest {
         assertTrue(expected.matches("[a-f0-9]{64}"));
         PackageManager manager = InstrumentationRegistry.getInstrumentation().getContext().getPackageManager();
         PackageInfo info = manager.getPackageInfo("com.termux", PackageManager.GET_SIGNATURES);
-        String version = InstrumentationRegistry.getArguments().getString("expected_version", "0.119.9");
+        String version = InstrumentationRegistry.getArguments().getString("expected_version", "0.119.10");
         assertEquals(version, info.versionName);
         assertEquals(1, info.signatures.length);
         byte[] digest = MessageDigest.getInstance("SHA-256").digest(info.signatures[0].toByteArray());
