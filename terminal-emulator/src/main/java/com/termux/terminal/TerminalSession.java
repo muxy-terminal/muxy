@@ -61,7 +61,8 @@ public final class TerminalSession extends TerminalOutput {
      * A queue written to from the main thread due to user interaction, and read by another thread which forwards by
      * writing to the {@link #mTerminalFileDescriptor}.
      */
-    final ByteQueue mTerminalToProcessIOQueue = new ByteQueue(4096);
+    final TerminalInputQueue mTerminalToProcessIOQueue = new TerminalInputQueue(1024 * 1024);
+    private boolean mInputBacklogReported;
     /** Buffer to write translate code points into utf8 before writing to mTerminalToProcessIOQueue */
     private final byte[] mUtf8InputBuffer = new byte[5];
 
@@ -187,12 +188,26 @@ public final class TerminalSession extends TerminalOutput {
                 final byte[] buffer = new byte[4096];
                 try (FileOutputStream termOut = new FileOutputStream(outputDescriptor)) {
                     while (true) {
-                        int bytesToWrite = mTerminalToProcessIOQueue.read(buffer, true);
+                        int bytesToWrite = mTerminalToProcessIOQueue.read(buffer);
                         if (bytesToWrite == -1) return;
                         termOut.write(buffer, 0, bytesToWrite);
                     }
                 } catch (IOException e) {
-                    // Ignore.
+                    mMainThreadHandler.post(() -> {
+                        if (!mDisposed && mShellPid > 0) {
+                            mClient.onTerminalInputError(TerminalSession.this, "Could not write terminal input");
+                            Logger.logStackTraceWithMessage(mClient, LOG_TAG, "PTY input write failed", e);
+                        }
+                    });
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    mMainThreadHandler.post(() -> {
+                        if (!mDisposed && mShellPid > 0) {
+                            mClient.onTerminalInputError(TerminalSession.this, "Terminal input writer was interrupted");
+                        }
+                    });
+                } finally {
+                    mTerminalToProcessIOQueue.close();
                 }
             }
         }.start();
@@ -210,7 +225,17 @@ public final class TerminalSession extends TerminalOutput {
     /** Write data to the shell process. */
     @Override
     public void write(byte[] data, int offset, int count) {
-        if (mShellPid > 0) mTerminalToProcessIOQueue.write(data, offset, count);
+        if (mDisposed || mShellPid <= 0) return;
+        TerminalInputQueue.Result result = mTerminalToProcessIOQueue.offer(data, offset, count);
+        if (result == TerminalInputQueue.Result.ACCEPTED) {
+            mInputBacklogReported = false;
+        } else if (!mInputBacklogReported) {
+            mInputBacklogReported = true;
+            String message = result == TerminalInputQueue.Result.FULL
+                    ? "Terminal input is full. The new input was not sent"
+                    : "Terminal input is closed. The new input was not sent";
+            mClient.onTerminalInputError(this, message);
+        }
     }
 
     /** Write the Unicode code point to the terminal encoded in UTF-8. */

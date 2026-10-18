@@ -63,6 +63,25 @@ public class NativeTerminalLifecycleTest {
         }
     }
 
+    @Test public void idleCompressionCompletesAndRestoredHistoryStillAcceptsOutput() {
+        try (NativeTerminal terminal = new NativeTerminal(80, 10, 5000, new Listener())) {
+            StringBuilder text = new StringBuilder();
+            for (int i = 0; i < 4000; i++) text.append("idle history ").append(i).append(" 한日本\r\n");
+            byte[] bytes = text.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            terminal.write(bytes, 0, bytes.length);
+            int history = terminal.state()[7];
+            assertTrue(history > 3000);
+            int steps = 0;
+            while (terminal.compressHistory()) assertTrue("Compression failed to converge", ++steps < 10000);
+            assertTrue(new String(terminal.readRow(-history).text).contains("idle history 0"));
+            assertTrue(new String(terminal.readRow(8).text).contains("idle history 3999"));
+            byte[] resumed = "RESUMED한\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            terminal.write(resumed, 0, resumed.length);
+            assertTrue(new String(terminal.readRow(8).text).contains("RESUMED한"));
+            assertTrue(terminal.state()[7] >= history);
+        }
+    }
+
     @Test public void closeIsIdempotentAndRejectsReads() {
         NativeTerminal terminal = new NativeTerminal(10, 3, 100, new Listener());
         terminal.close();

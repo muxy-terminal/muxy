@@ -54,6 +54,11 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
         this.mActivity = activity;
     }
 
+    @Override
+    public void onTerminalInputError(TerminalSession session, String message) {
+        Logger.logErrorAndShowToast(mActivity, LOG_TAG, message);
+    }
+
     /**
      * Should be called when mActivity.onCreate() is called
      */

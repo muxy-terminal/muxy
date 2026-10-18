@@ -115,6 +115,79 @@ public class TerminalViewIntegrationTest {
         }
     }
 
+    @Test public void stalledPtyDoesNotBlockTheMainThreadAndRetainsQueuedInput() throws Exception {
+        org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 23);
+        byte[] payload = new byte[128 * 1024];
+        Arrays.fill(payload, (byte) 'x');
+        write("stty raw -echo; print -n '\\033]2;blocked-ready\\007'; sleep 3; "
+                + "dd bs=1 count=131072 of=\"$CAPTURE\" 2>/dev/null; stty sane; print -n '\\033]2;blocked-done\\007'\r");
+        await(() -> titleIs("blocked-ready"));
+        java.util.concurrent.atomic.AtomicInteger pid = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicReference<TerminalSession> active = new AtomicReference<>();
+        scenario.onActivity(activity -> { pid.set(activity.session.getPid()); active.set(activity.session); });
+        java.util.concurrent.CountDownLatch returned = new java.util.concurrent.CountDownLatch(1);
+        android.system.Os.kill(-pid.get(), android.system.OsConstants.SIGSTOP);
+        boolean responsive;
+        try {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                try { active.get().write(payload, 0, payload.length); } finally { returned.countDown(); }
+            });
+            responsive = returned.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } finally {
+            android.system.Os.kill(-pid.get(), android.system.OsConstants.SIGCONT);
+        }
+        assertTrue("Main thread blocked behind a stalled PTY writer", responsive);
+        await(() -> titleIs("blocked-done"));
+        AtomicReference<byte[]> captured = new AtomicReference<>();
+        scenario.onActivity(activity -> {
+            try (FileInputStream stream = new FileInputStream(activity.capture);
+                 ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[4096];
+                int count;
+                while ((count = stream.read(buffer)) != -1) bytes.write(buffer, 0, count);
+                captured.set(bytes.toByteArray());
+            } catch (Exception error) { throw new IllegalStateException("Cannot read stalled PTY capture", error); }
+        });
+        assertArrayEquals(payload, captured.get());
+    }
+
+    @Test public void oversizedInputIsRejectedOnceAndTheSessionAcceptsTheNextCommand() throws Exception {
+        scenario.onActivity(activity -> {
+            byte[] oversized = new byte[1024 * 1024 + 1];
+            activity.session.write(oversized, 0, oversized.length);
+            activity.session.write(oversized, 0, oversized.length);
+            assertEquals(1, activity.inputErrors.size());
+            assertTrue(activity.inputErrors.get(0).contains("not sent"));
+        });
+        prepareCapture();
+        scenario.onActivity(activity -> { input.commitText("AFTER_REJECTION", 1); enter(); });
+        assertCaptured("AFTER_REJECTION");
+    }
+
+    @Test public void idleCompressionAndBackgroundResumeKeepTheSamePtyResponsive() throws Exception {
+        write("i=0; while [ $i -lt 3000 ]; do print -r -- \"idle-line-$i 한日本\"; "
+                + "i=$((i+1)); done; print -n '\\033]2;idle-ready\\007'\r");
+        await(() -> titleIs("idle-ready"));
+        java.util.concurrent.atomic.AtomicInteger pid = new java.util.concurrent.atomic.AtomicInteger();
+        scenario.onActivity(activity -> {
+            pid.set(activity.session.getPid());
+            assertTrue(activity.session.getEmulator().getScreen().getActiveTranscriptRows() > 1500);
+        });
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+        Thread.sleep(3000);
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
+        scenario.onActivity(activity -> {
+            assertEquals(pid.get(), activity.session.getPid());
+            assertTrue(activity.session.isRunning());
+            assertTrue(activity.session.getEmulator().getScreen().getTranscriptText().contains("idle-line-2999"));
+            activity.view.requestFocus();
+            input = activity.view.onCreateInputConnection(new EditorInfo());
+        });
+        prepareCapture();
+        scenario.onActivity(activity -> { input.commitText("RESUMED한", 1); enter(); });
+        assertCaptured("RESUMED한");
+    }
+
     @Test public void liveGboardTypingReachesThePty() throws Exception {
         String expected = InstrumentationRegistry.getArguments().getString("gboardExpected");
         org.junit.Assume.assumeNotNull(expected);

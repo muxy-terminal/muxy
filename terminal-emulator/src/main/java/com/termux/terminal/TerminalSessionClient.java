@@ -26,6 +26,10 @@ public interface TerminalSessionClient {
 
     void onTerminalCursorStateChange(boolean state);
 
+    default void onTerminalInputError(@NonNull TerminalSession session, @NonNull String message) {
+        logError("TerminalSession", message);
+    }
+
     void setTerminalShellPid(@NonNull TerminalSession session, int pid);
 
 

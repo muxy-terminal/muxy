@@ -20,6 +20,7 @@ public class TerminalTestActivity extends Activity implements TerminalViewClient
     public TerminalSession session;
     public File capture;
     public final List<String> errors = new ArrayList<>();
+    public final List<String> inputErrors = new ArrayList<>();
     public int singleTapRequests;
 
     @Override public void onCreate(Bundle state) {
@@ -57,6 +58,7 @@ public class TerminalTestActivity extends Activity implements TerminalViewClient
     @Override public void onPasteTextFromClipboard(TerminalSession changed) {}
     @Override public void onBell(TerminalSession changed) {}
     @Override public void onColorsChanged(TerminalSession changed) { if (view != null) view.invalidate(); }
+    @Override public void onTerminalInputError(TerminalSession changed, String message) { inputErrors.add(message); }
     @Override public void onTerminalCursorStateChange(boolean enabled) {}
     @Override public void setTerminalShellPid(TerminalSession changed, int pid) {}
     @Override public Integer getTerminalCursorStyle() { return 0; }
