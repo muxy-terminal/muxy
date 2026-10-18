@@ -31,4 +31,6 @@ No compression policy, Ghostty pin, terminal history limit, or native synchroniz
 
 Physical-device Doze, OEM background freezing, long-lived SSH network timeouts, and hours-long inactivity have not been reproduced. If those paths still freeze, capture the process state and main-thread/native stack before restarting the app. These checks do not claim to fix Android suspending a child process or a remote connection closing.
 
-Float and other pinned consumers receive this library change only after their muxy revision is updated and rebuilt. This correction has not been released yet.
+The coordinated 0.119.10 distribution pins this library revision in Float, API, Tasker, and Widget. Float surfaces input errors and passes its own paused-PTY byte-preservation and hidden-idle/resume regressions. Its teardown also detaches the rendered emulator before disposal so a pending overlay draw cannot access a closed terminal.
+
+Float's nine-scenario overlay/PTY suite completes without failures on API 35, with optional live typing skipped. Signed main updates pass shell/rotation, extra-key editing, and the keyboard toolbar toggle on API 21/35. Physical-device long-idle failure remains outside this evidence.

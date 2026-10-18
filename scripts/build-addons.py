@@ -10,14 +10,14 @@ import subprocess
 import tarfile
 
 
-CORE = "4f19a15cdbdce7334a7f2429bf45aa086b698896"
+CORE = "c13c4999bf928d2a61feaae738dc72837f391f3a"
 ADDONS = {
-    "termux-api": ("0.53.0+muxy.5", "7ae693f540a69e52a93125a1cfad82aacc3ef632", "com.termux.api", 24),
-    "termux-styling": ("0.32.1+muxy.5", "92c327f764a30c38d2394278ba942f160bb3affb", "com.termux.styling", 21),
-    "termux-boot": ("0.8.1+muxy.5", "89db1e99f986a6f49aa197842413c30c5b19aa00", "com.termux.boot", 21),
-    "termux-float": ("0.17.0+muxy.5", "621edec04349deb656e3ec0bafba3dc26fbb2213", "com.termux.window", 24),
-    "termux-tasker": ("0.9.0+muxy.5", "ba3f840c40381ac55710466a6f89e4c67704c9a5", "com.termux.tasker", 21),
-    "termux-widget": ("0.15.0+muxy.5", "6bb0360ac6ec97d11a75602720b8bf0176723e56", "com.termux.widget", 24),
+    "termux-api": ("0.53.0+muxy.6", "c4af084e500df2f3debd4f5c64f8cf6622f81cbc", "com.termux.api", 24),
+    "termux-styling": ("0.32.1+muxy.6", "8527bcd4c6cd841bcf2344f36c3d360078d7aef1", "com.termux.styling", 21),
+    "termux-boot": ("0.8.1+muxy.6", "92e202d8c189eaf21e328a7b00c958015ed985cf", "com.termux.boot", 21),
+    "termux-float": ("0.17.0+muxy.6", "6ea99e734f09217d67c0c08b09172fe285a05f51", "com.termux.window", 24),
+    "termux-tasker": ("0.9.0+muxy.6", "736f4edd34784c6e5daac468423ea3f6689934f8", "com.termux.tasker", 21),
+    "termux-widget": ("0.15.0+muxy.6", "1f3a45dd6895527efe7e03fa0389ed4fb83750a5", "com.termux.widget", 24),
 }
 CERTIFICATE = "756768af514d3fa0d1c214d54dabd7b0cd088a1723a22f520b90e8e8545262ce"
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,7 +90,7 @@ def archive_sources(destination, sources, label):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("destination", type=Path, help="New build directory")
-    parser.add_argument("--label", required=True, help="Addon distribution label, such as addons-0.119.8")
+    parser.add_argument("--label", required=True, help="Addon distribution label, such as addons-0.119.10")
     parser.add_argument("--keystore", required=True, type=Path)
     parser.add_argument("--password-file", required=True, type=Path)
     parser.add_argument("--alias", default="muxy")
