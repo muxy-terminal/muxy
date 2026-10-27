@@ -62,6 +62,8 @@ import com.termux.view.TerminalViewClient;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.TooltipCompat;
+import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.viewpager.widget.ViewPager;
 
@@ -244,6 +246,8 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         setTermuxTerminalViewAndClients();
 
         setTerminalToolbarView(savedInstanceState);
+
+        setSessionDrawerButtonView();
 
         setSettingsButtonView();
 
@@ -562,6 +566,50 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
 
+
+    private void setSessionDrawerButtonView() {
+        ImageButton sessionsButton = findViewById(R.id.session_drawer_button);
+        DrawerLayout drawer = getDrawer();
+        View sessionsDrawer = findViewById(R.id.left_drawer);
+        drawer.setDrawerTitle(GravityCompat.START, getString(R.string.title_sessions));
+        updateSessionDrawerButton(sessionsButton, drawer.isDrawerOpen(sessionsDrawer));
+        sessionsButton.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+            updateSessionDrawerButton(sessionsButton, drawer.isDrawerOpen(sessionsDrawer)));
+        sessionsButton.setOnClickListener(v -> {
+            // Programmatic drawer operations do not enforce the text selection lock.
+            if (drawer.getDrawerLockMode(sessionsDrawer) != DrawerLayout.LOCK_MODE_UNLOCKED) return;
+            if (drawer.isDrawerVisible(sessionsDrawer))
+                drawer.closeDrawer(sessionsDrawer);
+            else
+                drawer.openDrawer(sessionsDrawer);
+        });
+        drawer.addDrawerListener(new DrawerLayout.SimpleDrawerListener() {
+            @Override
+            public void onDrawerOpened(@NonNull View drawerView) {
+                updateSessionDrawerButton(sessionsButton, true);
+                if (sessionsButton.hasFocus()) sessionsDrawer.requestFocus();
+            }
+
+            @Override
+            public void onDrawerClosed(@NonNull View drawerView) {
+                updateSessionDrawerButton(sessionsButton, false);
+                if (sessionsDrawer.hasFocus() || sessionsButton.hasFocus()) {
+                    View textInput = findViewById(R.id.terminal_toolbar_text_input);
+                    if (getTerminalToolbarViewPager().getVisibility() == View.VISIBLE &&
+                        isTerminalToolbarTextInputViewSelected() && textInput != null)
+                        textInput.requestFocus();
+                    else
+                        mTerminalView.requestFocus();
+                }
+            }
+        });
+    }
+
+    private void updateSessionDrawerButton(ImageButton button, boolean drawerOpen) {
+        CharSequence description = getText(drawerOpen ? R.string.action_close_sessions : R.string.action_open_sessions);
+        button.setContentDescription(description);
+        TooltipCompat.setTooltipText(button, description);
+    }
 
     private void setSettingsButtonView() {
         ImageButton settingsButton = findViewById(R.id.settings_button);

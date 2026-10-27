@@ -22,6 +22,7 @@ For CI, `install-zig.py DESTINATION` installs the pinned compiler into a new dir
 - `0001-android-api21.patch`: use the positional-read fallback before Android API 24, including the 64-bit file-offset symbol for 32-bit Android.
 - `0002-history-retention-floor.patch`: retain the boundary history page when removing it would leave fewer than the requested history lines. Configured byte limits still apply independently. The JNI binding disables the default byte cap when history is enabled.
 - `0003-muxy-protocol-hooks.patch`: native integration hooks, Termux protocol/reset/scroll/style parity, and parser/color boundary fixes. `muxy_compat.zig` is copied into the same pinned build for CSI/DCS/OSC handling.
+- `0004-resize-wide-boundaries.patch`: clear both cells when an alternate-screen resize clips a wide character at the right edge.
 
 The row limit can be exceeded by the retained boundary page. The emulator schedules bounded native compression after one second without output. Retention/memory and throughput comparisons remain pending.
 

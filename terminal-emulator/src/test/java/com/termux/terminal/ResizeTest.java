@@ -2,6 +2,19 @@ package com.termux.terminal;
 
 public class ResizeTest extends TerminalTestCase {
 
+	public void testAlternateScreenResizeClearsClippedWideCharacter() {
+		withTerminalSized(5, 3).enterString("\033[?1049habc日");
+		resize(4, 3).assertLinesAre("abc ", "    ", "    ");
+		resize(5, 3).assertLinesAre("abc  ", "     ", "     ");
+		enterString("\r\n한😀").assertLinesAre("abc  ", "한😀 ", "     ");
+	}
+
+	public void testAlternateScreenResizeKeepsCompleteWideCharacter() {
+		withTerminalSized(6, 3).enterString("\033[?1049hab日cd");
+		resize(4, 3).assertLinesAre("ab日", "    ", "    ");
+		resize(6, 3).assertLinesAre("ab日  ", "      ", "      ");
+	}
+
 	public void testResizeWhenHasHistory() {
 		final int cols = 3;
 		withTerminalSized(cols, 3).enterString("111222333444555666777888999").assertCursorAt(2, 2).assertLinesAre("777", "888", "999");

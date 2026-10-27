@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <jni.h>
 #include <signal.h>
@@ -48,22 +49,33 @@ static int create_subprocess(JNIEnv* env,
             ptsname_r(ptm, devname, sizeof(devname))
 #endif
        ) {
+        close(ptm);
         return throw_runtime_exception(env, "Cannot grantpt()/unlockpt()/ptsname_r() on /dev/ptmx");
     }
 
     // Enable UTF-8 mode and disable flow control to prevent Ctrl+S from locking up the display.
     struct termios tios;
-    tcgetattr(ptm, &tios);
+    if (tcgetattr(ptm, &tios) != 0) {
+        close(ptm);
+        return throw_runtime_exception(env, "Cannot read PTY terminal attributes");
+    }
     tios.c_iflag |= IUTF8;
     tios.c_iflag &= ~(IXON | IXOFF);
-    tcsetattr(ptm, TCSANOW, &tios);
+    if (tcsetattr(ptm, TCSANOW, &tios) != 0) {
+        close(ptm);
+        return throw_runtime_exception(env, "Cannot set PTY terminal attributes");
+    }
 
     /** Set initial winsize. */
     struct winsize sz = { .ws_row = (unsigned short) rows, .ws_col = (unsigned short) columns, .ws_xpixel = (unsigned short) (columns * cell_width), .ws_ypixel = (unsigned short) (rows * cell_height)};
-    ioctl(ptm, TIOCSWINSZ, &sz);
+    if (ioctl(ptm, TIOCSWINSZ, &sz) != 0) {
+        close(ptm);
+        return throw_runtime_exception(env, "Cannot set PTY window size");
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
+        close(ptm);
         return throw_runtime_exception(env, "Fork failed");
     } else if (pid > 0) {
         *pProcessId = (int) pid;
@@ -198,17 +210,27 @@ JNIEXPORT void JNICALL Java_com_termux_terminal_JNI_setPtyUTF8Mode(JNIEnv* TERMU
     }
 }
 
-JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_waitFor(JNIEnv* TERMUX_UNUSED(env), jclass TERMUX_UNUSED(clazz), jint pid)
+JNIEXPORT jint JNICALL Java_com_termux_terminal_JNI_waitFor(JNIEnv* env, jclass TERMUX_UNUSED(clazz), jint pid)
 {
+    if (pid <= 0) return throw_runtime_exception(env, "Invalid subprocess PID");
+
     int status;
-    waitpid(pid, &status, 0);
+    pid_t result;
+    do {
+        result = waitpid(pid, &status, 0);
+    } while (result < 0 && errno == EINTR);
+
+    if (result < 0) {
+        char message[128];
+        snprintf(message, sizeof(message), "Cannot wait for subprocess: %s", strerror(errno));
+        return throw_runtime_exception(env, message);
+    }
     if (WIFEXITED(status)) {
         return WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
         return -WTERMSIG(status);
     } else {
-        // Should never happen - waitpid(2) says "One of the first three macros will evaluate to a non-zero (true) value".
-        return 0;
+        return throw_runtime_exception(env, "Unexpected subprocess wait status");
     }
 }
 

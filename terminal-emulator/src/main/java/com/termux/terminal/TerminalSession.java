@@ -9,10 +9,9 @@ import android.system.OsConstants;
 
 import java.io.File;
 import java.io.FileDescriptor;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -168,16 +167,26 @@ public final class TerminalSession extends TerminalOutput {
         new Thread("TermSessionInputReader[pid=" + mShellPid + "]") {
             @Override
             public void run() {
-                try (InputStream termIn = new FileInputStream(inputDescriptor)) {
+                try {
                     final byte[] buffer = new byte[4096];
                     while (true) {
-                        int read = termIn.read(buffer);
-                        if (read == -1) return;
+                        int read = readFromPty(inputDescriptor, buffer);
+                        if (read <= 0) return;
                         if (!mProcessToTerminalIOQueue.write(buffer, 0, read)) return;
-                        mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
+                        if (!mMainThreadHandler.hasMessages(MSG_NEW_INPUT)) {
+                            mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
+                        }
                     }
-                } catch (Exception e) {
-                    // Ignore, just shutting down.
+                } catch (ErrnoException | IOException error) {
+                    reportIoError("Could not read terminal output", error);
+                } finally {
+                    mProcessToTerminalIOQueue.close();
+                    mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
+                    try {
+                        Os.close(inputDescriptor);
+                    } catch (ErrnoException error) {
+                        reportIoError("Could not close terminal output", error);
+                    }
                 }
             }
         }.start();
@@ -192,20 +201,11 @@ public final class TerminalSession extends TerminalOutput {
                         if (bytesToWrite == -1) return;
                         termOut.write(buffer, 0, bytesToWrite);
                     }
-                } catch (IOException e) {
-                    mMainThreadHandler.post(() -> {
-                        if (!mDisposed && mShellPid > 0) {
-                            mClient.onTerminalInputError(TerminalSession.this, "Could not write terminal input");
-                            Logger.logStackTraceWithMessage(mClient, LOG_TAG, "PTY input write failed", e);
-                        }
-                    });
-                } catch (InterruptedException e) {
+                } catch (IOException error) {
+                    reportIoError("Could not write terminal input", error);
+                } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
-                    mMainThreadHandler.post(() -> {
-                        if (!mDisposed && mShellPid > 0) {
-                            mClient.onTerminalInputError(TerminalSession.this, "Terminal input writer was interrupted");
-                        }
-                    });
+                    reportIoError("Terminal input writer was interrupted", error);
                 } finally {
                     mTerminalToProcessIOQueue.close();
                 }
@@ -215,11 +215,40 @@ public final class TerminalSession extends TerminalOutput {
         new Thread("TermSessionWaiter[pid=" + mShellPid + "]") {
             @Override
             public void run() {
-                int processExitCode = JNI.waitFor(processPid);
-                mMainThreadHandler.sendMessage(mMainThreadHandler.obtainMessage(MSG_PROCESS_EXITED, processExitCode));
+                try {
+                    int processExitCode = JNI.waitFor(processPid);
+                    mMainThreadHandler.sendMessage(mMainThreadHandler.obtainMessage(MSG_PROCESS_EXITED, processExitCode));
+                } catch (RuntimeException error) {
+                    reportIoError("Could not wait for terminal process", error);
+                }
             }
         }.start();
 
+    }
+
+    static int readFromPty(FileDescriptor descriptor, byte[] buffer) throws ErrnoException, IOException {
+        while (true) {
+            try {
+                return Os.read(descriptor, buffer, 0, buffer.length);
+            } catch (ErrnoException error) {
+                if (error.errno == OsConstants.EINTR) continue;
+                // Linux PTY masters report EIO when the last slave closes.
+                if (error.errno == OsConstants.EIO) return -1;
+                throw error;
+            } catch (InterruptedIOException error) {
+                if (error.bytesTransferred < 0 || error.bytesTransferred > buffer.length) throw error;
+                if (error.bytesTransferred > 0) return error.bytesTransferred;
+            }
+        }
+    }
+
+    private void reportIoError(String message, Exception error) {
+        mMainThreadHandler.post(() -> {
+            if (!mDisposed && mShellPid > 0) {
+                Logger.logStackTraceWithMessage(mClient, LOG_TAG, message, error);
+                mClient.onTerminalInputError(this, message);
+            }
+        });
     }
 
     /** Write data to the shell process. */

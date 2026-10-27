@@ -33,6 +33,18 @@ public class DefaultExtraKeysTest {
         assertNull(keys[0][2].getPopup());
     }
 
+    @Test public void customDrawerAndKeyboardPopupRemainAvailable() throws Exception {
+        ExtraKeyButton[][] keys = new ExtraKeysInfo("[[{key:'DRAWER',display:'Sessions',popup:'KEYBOARD'},'-']]",
+                TermuxPropertyConstants.DEFAULT_IVALUE_EXTRA_KEYS_STYLE,
+                ExtraKeysConstants.CONTROL_CHARS_ALIASES).getMatrix();
+        assertEquals(1, keys.length);
+        assertEquals(2, keys[0].length);
+        assertEquals("DRAWER", keys[0][0].getKey());
+        assertEquals("Sessions", keys[0][0].getDisplay());
+        assertEquals("KEYBOARD", keys[0][0].getPopup().getKey());
+        assertEquals("-", keys[0][1].getKey());
+    }
+
     @Test public void customDashAndPopupRemainAvailable() throws Exception {
         ExtraKeyButton[][] keys = new ExtraKeysInfo("[[{key:'-',popup:'|'}]]",
                 TermuxPropertyConstants.DEFAULT_IVALUE_EXTRA_KEYS_STYLE,

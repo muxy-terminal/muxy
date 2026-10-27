@@ -98,7 +98,7 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
      */
     private TermuxShellManager mShellManager;
 
-    /** The wake lock and wifi lock are always acquired and released together. */
+    /** The CPU lock can remain held when Wi-Fi locking is unavailable. */
     private PowerManager.WakeLock mWakeLock;
     private WifiManager.WifiLock mWifiLock;
 
@@ -305,30 +305,43 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
     /** Process action to acquire Power and Wi-Fi WakeLocks. */
     @SuppressLint({"WakelockTimeout", "BatteryLife"})
     private void actionAcquireWakeLock() {
-        if (mWakeLock != null) {
-            Logger.logDebug(LOG_TAG, "Ignoring acquiring WakeLocks since they are already held");
+        if (mWakeLock != null && mWakeLock.isHeld() && mWifiLock != null && mWifiLock.isHeld()) {
+            Logger.logDebug(LOG_TAG, "WakeLocks are already held");
             return;
         }
 
-        Logger.logDebug(LOG_TAG, "Acquiring WakeLocks");
+        try {
+            if (mWakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm == null) throw new IllegalStateException("Power service is unavailable");
+                mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, getPackageName() + ":service-wakelock");
+                mWakeLock.setReferenceCounted(false);
+            }
+            if (!mWakeLock.isHeld()) mWakeLock.acquire();
+        } catch (RuntimeException error) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Could not acquire CPU wake lock", error);
+            Logger.showToast(this, "Could not acquire CPU wake lock", true);
+        }
 
-        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TermuxConstants.TERMUX_APP_NAME.toLowerCase() + ":service-wakelock");
-        mWakeLock.acquire();
+        // A missing Wi-Fi service must not release the CPU lock or stop terminal sessions.
+        try {
+            if (mWifiLock == null) {
+                WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                if (wm == null) throw new IllegalStateException("Wi-Fi service is unavailable");
+                mWifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, getPackageName() + ":service-wifilock");
+                mWifiLock.setReferenceCounted(false);
+            }
+            if (!mWifiLock.isHeld()) mWifiLock.acquire();
+        } catch (RuntimeException error) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Could not acquire Wi-Fi wake lock", error);
+            Logger.showToast(this, "Could not acquire Wi-Fi wake lock", true);
+        }
 
-        // http://tools.android.com/tech-docs/lint-in-studio-2-3#TOC-WifiManager-Leak
-        WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        mWifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, TermuxConstants.TERMUX_APP_NAME.toLowerCase());
-        mWifiLock.acquire();
-
-        if (!PermissionUtils.checkIfBatteryOptimizationsDisabled(this)) {
+        if (mWakeLock != null && mWakeLock.isHeld() && !PermissionUtils.checkIfBatteryOptimizationsDisabled(this)) {
             PermissionUtils.requestDisableBatteryOptimizations(this);
         }
 
         updateNotification();
-
-        Logger.logDebug(LOG_TAG, "WakeLocks acquired successfully");
-
     }
 
     /** Process action to release Power and Wi-Fi WakeLocks. */
@@ -341,13 +354,21 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
         Logger.logDebug(LOG_TAG, "Releasing WakeLocks");
 
         if (mWakeLock != null) {
-            mWakeLock.release();
-            mWakeLock = null;
+            try {
+                if (mWakeLock.isHeld()) mWakeLock.release();
+                mWakeLock = null;
+            } catch (RuntimeException error) {
+                Logger.logStackTraceWithMessage(LOG_TAG, "Could not release CPU wake lock", error);
+            }
         }
 
         if (mWifiLock != null) {
-            mWifiLock.release();
-            mWifiLock = null;
+            try {
+                if (mWifiLock.isHeld()) mWifiLock.release();
+                mWifiLock = null;
+            } catch (RuntimeException error) {
+                Logger.logStackTraceWithMessage(LOG_TAG, "Could not release Wi-Fi wake lock", error);
+            }
         }
 
         if (updateNotification)
@@ -798,14 +819,18 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
             notificationText += ", " + taskCount + " task" + (taskCount == 1 ? "" : "s");
         }
 
-        final boolean wakeLockHeld = mWakeLock != null;
-        if (wakeLockHeld) notificationText += " (wake lock held)";
+        final boolean wakeLockHeld = mWakeLock != null && mWakeLock.isHeld();
+        final boolean wifiLockHeld = mWifiLock != null && mWifiLock.isHeld();
+        final boolean locksHeld = wakeLockHeld || wifiLockHeld;
+        if (wakeLockHeld && wifiLockHeld) notificationText += " (wake and Wi-Fi locks held)";
+        else if (wakeLockHeld) notificationText += " (wake lock held, Wi-Fi lock unavailable)";
+        else if (wifiLockHeld) notificationText += " (Wi-Fi lock held, wake lock unavailable)";
 
 
         // Set notification priority
         // If holding a wake or wifi lock consider the notification of high priority since it's using power,
         // otherwise use a low priority
-        int priority = (wakeLockHeld) ? Notification.PRIORITY_HIGH : Notification.PRIORITY_LOW;
+        int priority = locksHeld ? Notification.PRIORITY_HIGH : Notification.PRIORITY_LOW;
 
 
         // Build the notification
@@ -834,10 +859,10 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
 
 
         // Set Wakelock button actions
-        String newWakeAction = wakeLockHeld ? TERMUX_SERVICE.ACTION_WAKE_UNLOCK : TERMUX_SERVICE.ACTION_WAKE_LOCK;
+        String newWakeAction = locksHeld ? TERMUX_SERVICE.ACTION_WAKE_UNLOCK : TERMUX_SERVICE.ACTION_WAKE_LOCK;
         Intent toggleWakeLockIntent = new Intent(this, TermuxService.class).setAction(newWakeAction);
-        String actionTitle = res.getString(wakeLockHeld ? R.string.notification_action_wake_unlock : R.string.notification_action_wake_lock);
-        int actionIcon = wakeLockHeld ? android.R.drawable.ic_lock_idle_lock : android.R.drawable.ic_lock_lock;
+        String actionTitle = res.getString(locksHeld ? R.string.notification_action_wake_unlock : R.string.notification_action_wake_lock);
+        int actionIcon = locksHeld ? android.R.drawable.ic_lock_idle_lock : android.R.drawable.ic_lock_lock;
         builder.addAction(actionIcon, actionTitle, PendingIntent.getService(this, 0, toggleWakeLockIntent, 0));
 
 
@@ -853,7 +878,8 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
 
     /** Update the shown foreground service notification after making any changes that affect it. */
     private synchronized void updateNotification() {
-        if (mWakeLock == null && mShellManager.mTermuxSessions.isEmpty() && mShellManager.mTermuxTasks.isEmpty()) {
+        boolean locksHeld = (mWakeLock != null && mWakeLock.isHeld()) || (mWifiLock != null && mWifiLock.isHeld());
+        if (!locksHeld && mShellManager.mTermuxSessions.isEmpty() && mShellManager.mTermuxTasks.isEmpty()) {
             // Exit if we are updating after the user disabled all locks with no sessions or tasks running.
             requestStopService();
         } else {

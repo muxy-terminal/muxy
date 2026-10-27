@@ -42,6 +42,9 @@
 
 
     <!-- Terminal Sidebar and Shortcuts -->
+    <string name="title_sessions">Sessions</string>
+    <string name="action_open_sessions">Open sessions</string>
+    <string name="action_close_sessions">Close sessions</string>
     <string name="action_new_session">New session</string>
     <string name="action_new_session_failsafe">Failsafe</string>
     <string name="title_max_terminals_reached">Max terminals reached</string>

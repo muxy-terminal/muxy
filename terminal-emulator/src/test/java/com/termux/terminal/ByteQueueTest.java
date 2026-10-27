@@ -51,4 +51,76 @@ public class ByteQueueTest extends TestCase {
 		assertEquals(0, q.read(new byte[128], false));
 	}
 
+	public void testClosePreservesAcceptedOutputUntilDrained() {
+		ByteQueue queue = new ByteQueue(4);
+		assertTrue(queue.write(new byte[]{1, 2, 3, 4}, 0, 4));
+		byte[] prefix = new byte[3];
+		assertEquals(3, queue.read(prefix, false));
+		assertTrue(queue.write(new byte[]{5, 6, 7}, 0, 3));
+		queue.close();
+		assertFalse(queue.write(new byte[]{8}, 0, 1));
+		byte[] remaining = new byte[4];
+		assertEquals(4, queue.read(remaining, false));
+		assertArrayEquals(new byte[]{4, 5, 6, 7}, remaining);
+		assertEquals(-1, queue.read(remaining, true));
+	}
+
+	public void testOutputResumesAfterAnEmptyQueueAndBlockedProducer() throws Exception {
+		ByteQueue queue = new ByteQueue(4);
+		byte[] expected = new byte[4096];
+		for (int i = 0; i < expected.length; i++) expected[i] = (byte) i;
+		Thread producer = new Thread(() -> {
+			queue.write(expected, 0, expected.length);
+			queue.close();
+		});
+		producer.setDaemon(true);
+		assertEquals(0, queue.read(new byte[4], false));
+		producer.start();
+		byte[] actual = new byte[expected.length];
+		byte[] chunk = new byte[3];
+		int offset = 0;
+		try {
+			while (offset < actual.length) {
+				int read = queue.read(chunk, true);
+				assertTrue(read > 0);
+				System.arraycopy(chunk, 0, actual, offset, read);
+				offset += read;
+			}
+			assertArrayEquals(expected, actual);
+		} finally {
+			queue.close();
+			producer.join(1000);
+		}
+		assertFalse(producer.isAlive());
+		assertEquals(-1, queue.read(chunk, false));
+	}
+
+	public void testCloseWakesAProducerWaitingForSpace() throws Exception {
+		ByteQueue queue = new ByteQueue(1);
+		assertTrue(queue.write(new byte[]{1}, 0, 1));
+		java.util.concurrent.atomic.AtomicBoolean accepted = new java.util.concurrent.atomic.AtomicBoolean(true);
+		Thread producer = new Thread(() -> accepted.set(queue.write(new byte[]{2}, 0, 1)));
+		producer.setDaemon(true);
+		producer.start();
+		queue.close();
+		producer.join(1000);
+		assertFalse(producer.isAlive());
+		assertFalse(accepted.get());
+		byte[] remaining = new byte[1];
+		assertEquals(1, queue.read(remaining, false));
+		assertEquals(1, remaining[0]);
+		assertEquals(-1, queue.read(remaining, false));
+	}
+
+	public void testInvalidCapacityAndRangesAreRejected() {
+		org.junit.Assert.assertThrows(IllegalArgumentException.class, () -> new ByteQueue(0));
+		ByteQueue queue = new ByteQueue(4);
+		org.junit.Assert.assertThrows(IllegalArgumentException.class,
+			() -> queue.write(new byte[1], -1, 1));
+		org.junit.Assert.assertThrows(IllegalArgumentException.class,
+			() -> queue.write(new byte[1], Integer.MAX_VALUE, 1));
+		org.junit.Assert.assertThrows(IllegalArgumentException.class,
+			() -> queue.read(new byte[0], false));
+	}
+
 }

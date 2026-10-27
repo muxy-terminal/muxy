@@ -115,6 +115,54 @@ public class TerminalViewIntegrationTest {
         }
     }
 
+    @Test public void idlePtyResumesOutputAfterTheActivityStopsAndRestarts() throws Exception {
+        write("printf '\\033]2;idle-ready\\007'; sleep 2; "
+                + "printf 'IDLE-RESUMED한\\r\\n\\033]2;idle-done\\007'\r");
+        await(() -> titleIs("idle-ready"));
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+        await(() -> titleIs("idle-done"));
+        scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
+        await(this::ready);
+        scenario.onActivity(activity -> {
+            assertTrue(activity.session.isRunning());
+            assertTrue(activity.session.getEmulator().getScreen().getTranscriptText().contains("IDLE-RESUMED한"));
+            Bitmap bitmap = Bitmap.createBitmap(activity.view.getWidth(), activity.view.getHeight(), Bitmap.Config.ARGB_8888);
+            try {
+                activity.view.draw(new Canvas(bitmap));
+            } finally {
+                bitmap.recycle();
+            }
+        });
+    }
+
+    @Test public void fontZoomRendersWideTextAtTheAlternateScreenBoundary() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger clippedColumn = new java.util.concurrent.atomic.AtomicInteger();
+        scenario.onActivity(activity -> {
+            TerminalRenderer renderer = new TerminalRenderer(26, activity.view.mRenderer.mTypeface);
+            clippedColumn.set(Math.max(4, (int) (activity.view.getWidth() / renderer.mFontWidth)));
+            assertTrue(clippedColumn.get() < activity.session.getEmulator().mColumns);
+        });
+        write("stty -echo; printf '\\033[?1049h\\033[2J\\033[H\\033[1;" + clippedColumn.get()
+                + "H日\\033]2;zoom-ready\\007'; IFS= read -r value; printf '\\033[?1049l'; "
+                + "stty echo; printf '\\033]2;zoom-done\\007'\r");
+        await(() -> titleIs("zoom-ready"));
+        scenario.onActivity(activity -> {
+            assertTrue(activity.session.getEmulator().isAlternateBufferActive());
+            for (int size : new int[]{26, 18, 32, 22, 40, 24}) {
+                activity.view.setTextSize(size);
+                Bitmap bitmap = Bitmap.createBitmap(activity.view.getWidth(), activity.view.getHeight(), Bitmap.Config.ARGB_8888);
+                try {
+                    activity.view.draw(new Canvas(bitmap));
+                } finally {
+                    bitmap.recycle();
+                }
+            }
+        });
+        write("\r");
+        await(() -> titleIs("zoom-done"));
+        scenario.onActivity(activity -> assertFalse(activity.session.getEmulator().isAlternateBufferActive()));
+    }
+
     @Test public void stalledPtyDoesNotBlockTheMainThreadAndRetainsQueuedInput() throws Exception {
         org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 23);
         byte[] payload = new byte[128 * 1024];

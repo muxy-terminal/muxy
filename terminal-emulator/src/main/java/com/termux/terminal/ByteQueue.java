@@ -9,15 +9,17 @@ final class ByteQueue {
     private boolean mOpen = true;
 
     public ByteQueue(int size) {
+        if (size <= 0) throw new IllegalArgumentException("Invalid terminal output capacity");
         mBuffer = new byte[size];
     }
 
     public synchronized void close() {
         mOpen = false;
-        notify();
+        notifyAll();
     }
 
     public synchronized int read(byte[] buffer, boolean block) {
+        if (buffer.length == 0) throw new IllegalArgumentException("Empty terminal output buffer");
         while (mStoredBytes == 0 && mOpen) {
             if (block) {
                 try {
@@ -29,7 +31,7 @@ final class ByteQueue {
                 return 0;
             }
         }
-        if (!mOpen) return -1;
+        if (mStoredBytes == 0) return -1;
 
         int totalRead = 0;
         int bufferLength = mBuffer.length;
@@ -57,10 +59,8 @@ final class ByteQueue {
      * Returns whether the output was totally written, false if it was closed before.
      */
     public boolean write(byte[] buffer, int offset, int lengthToWrite) {
-        if (lengthToWrite + offset > buffer.length) {
-            throw new IllegalArgumentException("length + offset > buffer.length");
-        } else if (lengthToWrite <= 0) {
-            throw new IllegalArgumentException("length <= 0");
+        if (offset < 0 || lengthToWrite <= 0 || offset > buffer.length - lengthToWrite) {
+            throw new IllegalArgumentException("Invalid terminal output range");
         }
 
         final int bufferLength = mBuffer.length;
