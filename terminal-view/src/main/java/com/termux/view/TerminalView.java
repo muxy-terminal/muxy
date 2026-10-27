@@ -57,6 +57,7 @@ public final class TerminalView extends View {
     public TerminalEmulator mEmulator;
 
     public TerminalRenderer mRenderer;
+    private final TerminalFonts mDefaultFonts;
 
     public TerminalViewClient mClient;
 
@@ -227,6 +228,7 @@ public final class TerminalView extends View {
 
     public TerminalView(Context context, AttributeSet attributes) { // NO_UCD (unused code)
         super(context, attributes);
+        mDefaultFonts = new TerminalFonts(context.getAssets(), context.getResources().getConfiguration().locale);
         mGestureRecognizer = new GestureAndScaleRecognizer(context, new GestureAndScaleRecognizer.Listener() {
             private TerminalEmulator tapEmulator;
             private int tapGeneration;
@@ -543,8 +545,15 @@ public final class TerminalView extends View {
      * @param textSize the new font size, in density-independent pixels.
      */
     public void setTextSize(int textSize) {
-        mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface);
+        mRenderer = new TerminalRenderer(textSize, mRenderer == null ? mDefaultFonts.monospace : mRenderer.mTypeface,
+            mRenderer == null ? mDefaultFonts : mRenderer.mFonts);
         updateSize();
+    }
+
+    public void setDefaultTypeface() {
+        mRenderer = new TerminalRenderer(mRenderer.mTextSize, mDefaultFonts.monospace, mDefaultFonts);
+        updateSize();
+        invalidate();
     }
 
     public void setTypeface(Typeface newTypeface) {

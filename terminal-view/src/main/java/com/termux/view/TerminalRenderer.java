@@ -23,6 +23,7 @@ public final class TerminalRenderer {
 
     final int mTextSize;
     final Typeface mTypeface;
+    final TerminalFonts mFonts;
     private final Paint mTextPaint = new Paint();
 
     /** The width of a single mono spaced character obtained by {@link Paint#measureText(String)} on a single 'X'. */
@@ -35,18 +36,32 @@ public final class TerminalRenderer {
     final int mFontLineSpacingAndAscent;
 
     public TerminalRenderer(int textSize, Typeface typeface) {
+        this(textSize, typeface, null);
+    }
+
+    TerminalRenderer(int textSize, Typeface typeface, TerminalFonts fonts) {
         mTextSize = textSize;
         mTypeface = typeface;
+        mFonts = fonts;
 
         mTextPaint.setTypeface(typeface);
         mTextPaint.setAntiAlias(true);
         mTextPaint.setTextSize(textSize);
-
-        mFontLineSpacing = (int) Math.ceil(mTextPaint.getFontSpacing());
-        mFontAscent = (int) Math.ceil(mTextPaint.ascent());
-        mFontLineSpacingAndAscent = mFontLineSpacing + mFontAscent;
         mFontWidth = mTextPaint.measureText("X");
 
+        float spacing = mTextPaint.getFontSpacing();
+        float ascent = mTextPaint.ascent();
+        if (fonts != null) {
+            for (Typeface fallback : new Typeface[]{fonts.korean, fonts.japanese, fonts.chinese}) {
+                mTextPaint.setTypeface(fallback);
+                spacing = Math.max(spacing, mTextPaint.getFontSpacing());
+                ascent = Math.min(ascent, mTextPaint.ascent());
+            }
+            mTextPaint.setTypeface(typeface);
+        }
+        mFontLineSpacing = (int) Math.ceil(spacing);
+        mFontAscent = (int) Math.ceil(ascent);
+        mFontLineSpacingAndAscent = mFontLineSpacing + mFontAscent;
     }
 
     /** Render the terminal to a canvas with at a specified row scroll, and an optional rectangular selection. */
@@ -89,7 +104,7 @@ public final class TerminalRenderer {
 
     private float measureCluster(char[] text, int start, int end, long style) {
         int effect = TextStyle.decodeEffect(style);
-        mTextPaint.setTypeface(mTypeface);
+        mTextPaint.setTypeface(mFonts == null ? mTypeface : mFonts.forCodePoint(Character.codePointAt(text, start, end)));
         mTextPaint.setFakeBoldText((effect & (TextStyle.CHARACTER_ATTRIBUTE_BOLD | TextStyle.CHARACTER_ATTRIBUTE_BLINK)) != 0);
         mTextPaint.setTextSkewX((effect & TextStyle.CHARACTER_ATTRIBUTE_ITALIC) != 0 ? -0.35f : 0);
         if (Build.VERSION.SDK_INT >= 23 && !mTextPaint.hasGlyph(new String(text, start, end - start))) {
